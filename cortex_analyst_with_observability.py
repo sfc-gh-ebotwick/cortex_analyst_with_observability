@@ -40,7 +40,6 @@ FILE = "revenue_timeseries.yaml"
 
 # Initialize Snowpark session for Snowflake queries
 snowpark_session = get_active_session()
-snowpark_session.use_schema(SCHEMA)
 
 # --- Trulens Setup ---
 # Custom connector to bypass database access issues in UDF
@@ -127,6 +126,8 @@ class CortexAnalyst:
             f"* error code: `{parsed_content['error_code']}`\n\n"
             f"Message:\n```\n{parsed_content['message']}\n```"
         )
+
+        st.write(error_msg)
         return parsed_content, error_msg
 
     @instrument
@@ -292,10 +293,10 @@ def process_user_input(prompt: str):
                 st.session_state.warnings = response["warnings"]
             if error_msg:
                 st.session_state["fire_API_error_notify"] = True
-            if analyst_message["content"][1]["type"] != "sql":
-                st.session_state.messages.append(analyst_message)
-                st.write(analyst_message["content"][0]["text"])
-                st.rerun()
+            # if analyst_message["content"][1]["type"] != "sql":
+            #     st.session_state.messages.append(analyst_message)
+            #     st.write(analyst_message["content"][0]["text"])
+            #     st.rerun()
             else:
                 with st.spinner("Running query and summarizing results..."):
                     time.sleep(1)
