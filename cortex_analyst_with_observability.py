@@ -12,7 +12,7 @@ from trulens.core import TruSession, Feedback, Select
 from trulens.connectors.snowflake import SnowflakeConnector
 from trulens.providers.cortex import Cortex
 from trulens.apps.custom import instrument, TruCustomApp
-from trulens.apps.app import TruApp
+# from trulens.apps.app import TruApp
 import os
 
 # Log Trulens version for debugging
@@ -27,19 +27,20 @@ import os
 
 # Configuration constants
 AVAILABLE_SEMANTIC_MODELS_PATHS = [
-    "CORTEX_AGENTS_DEMO.STAYBNB.SEMANTIC_MODELS/rental_home_bookings.yaml"
+    "CORTEX_ANALYST_DEMO.REVENUE_TIMESERIES.RAW_DATA/revenue_timeseries.yaml"
 ]
 API_ENDPOINT = "/api/v2/cortex/analyst/message"
 API_TIMEOUT = 50000  # in milliseconds
 FEEDBACK_API_ENDPOINT = "/api/v2/cortex/analyst/feedback"
 SUMMARY_MODELS = ["claude-3-5-sonnet"]
-DATABASE = "CORTEX_AGENTS_DEMO"
-SCHEMA = "STAYBNB"
-STAGE = "SEMANTIC_MODELS"
-FILE = "rental_home_bookings.yaml"
+DATABASE = "CORTEX_ANALYST_DEMO"
+SCHEMA = "REVENUE_TIMESERIES"
+STAGE = "RAW_DATA"
+FILE = "revenue_timeseries.yaml"
 
 # Initialize Snowpark session for Snowflake queries
 snowpark_session = get_active_session()
+snowpark_session.use_schema(SCHEMA)
 
 # --- Trulens Setup ---
 # Custom connector to bypass database access issues in UDF
@@ -64,8 +65,8 @@ try:
     st.write(f"Connector type: {type(conn).__name__}")
 except Exception as e:
     st.warning(f"SnowflakeConnector initialization failed: {str(e)}. Using custom connector.")
-    conn = CustomSnowflakeConnector(snowpark_session, DATABASE, SCHEMA)
-    st.write(f"Connector type: {type(conn).__name__}")
+    # conn = CustomSnowflakeConnector(snowpark_session, DATABASE, SCHEMA)
+    # st.write(f"Connector type: {type(conn).__name__}")
 
 # Initialize TruSession
 tru_session = TruSession()
@@ -174,15 +175,15 @@ CA = CortexAnalyst()
 feedback_enabled = False
 try:
     # Attempt with feedback logging
-    tru_app = TruApp(
+    tru_app = TruCustomApp(
         app = CA,
         app_id="CORTEX_ANALYST",
         app_name = "Storage-Analyst_with_Trulens",
         app_version= 'v1',
         feedbacks=feedback_list,
-        main_method=CA.get_analyst_response,
         session=tru_session
     )
+    
     feedback_enabled = True
     st.write("TruCustomApp initialized with feedback logging.")
     st.write(f"TruCustomApp connector set: {tru_app.connector is not None}")
