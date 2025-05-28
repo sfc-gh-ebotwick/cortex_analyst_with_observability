@@ -320,6 +320,7 @@ def process_user_input(prompt: str):
                             except Exception as e:
                                 st.sidebar.warning(f"Failed to display feedback: {str(e)}")
                         st.rerun()
+    return summary
 
 def display_conversation():
     """Displays the chat conversation history."""
