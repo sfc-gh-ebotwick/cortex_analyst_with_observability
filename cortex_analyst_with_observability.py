@@ -276,7 +276,10 @@ def main():
     # handle_user_inputs()
     
     user_input = st.chat_input("What is your question?")
+    st.write(f"User Input: {user_input}")
     if user_input:
+        st.write("FOUND USER INPUT!")
+
         with tru_app as recording:
             CA.process_user_input(user_input)
         st.write("RECORDED_APP_CALL!")
