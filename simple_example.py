@@ -222,11 +222,14 @@ class CortexAnalyst():
 #instantiate class
 CA = CortexAnalyst()
 
+TRULENS_APP_NAME = "CORTEX_ANALYST_WITH_AI_OBSERVABILITY"
+TRULENS_APP_VERSION = "V0"
+
 # CREATE TRULENS APP WITH CA instance
 tru_app = TruCustomApp(
     CA,
-    app_id="CORTEX_ANALYST",
-    app_version="TEST",
+    app_id= TRULENS_APP_NAME,
+    app_version=TRULENS_APP_VERSION,
     feedbacks=feedback_list
 )
 
@@ -269,6 +272,8 @@ if user_input := st.chat_input("What is your question?"):
 
     # Test the pipeline
     with tru_app as recording:
+        recording.record_metadata = ({"Semantic_Model_File": FILE,
+                                   "Summarization_LLM": SUMMARIZATION_LLM})
         CA.summarize_sql_results(prompt=user_input)
     
 if st.session_state.active_suggestion:
