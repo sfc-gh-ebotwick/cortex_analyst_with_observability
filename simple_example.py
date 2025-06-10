@@ -12,6 +12,7 @@ from trulens.connectors.snowflake import SnowflakeConnector
 from trulens.apps.custom import instrument
 from trulens.providers.cortex.provider import Cortex
 from trulens.core import Feedback, SnowflakeFeedback, Select
+from trulens.core.feedback import feedback as core_feedback
 from trulens.apps.custom import TruCustomApp
 
 
@@ -31,10 +32,39 @@ except:
         conn = SnowflakeConnector(snowpark_session=snowpark_session)
         tru_session = TruSession(connector=conn)
         #Define llm for eval
-        provider = Cortex(snowpark_session.connection, "llama3.1-70b")
+        provider = Cortex(snowpark_session, "mistral-large2")
         return  tru_session, provider
     tru_session, provider = create_tru_session()
 
+
+SUMMARIZATION_LLM = st.sidebar.selectbox('Select your Summarization LLM:',(
+                "openai-gpt-4.1",
+                "mistral-large2",
+                "llama3.3-70b",
+                "llama3.1-70b",
+                "llama4-maverick",
+                "llama4-scout",   
+                "claude-3-5-sonnet",
+                "gemma-7b",
+                "jamba-1.5-mini",
+                "jamba-1.5-large",
+                "jamba-instruct",
+                "llama2-70b-chat",
+                "llama3-8b",
+                "llama3-70b",
+                "llama3.1-8b",
+                "llama3.1-405b",
+                "llama3.2-1b",
+                "llama3.2-3b",
+                "snowflake-llama3.3-70b",
+                "mistral-large",
+                "mistral-large2",
+                "mistral-7b",
+                "mixtral-8x7b",
+                "reka-core",
+                "reka-flash",
+                "snowflake-arctic",
+                "snowflake-llama-3.1-405b"), key="model_name")
 
 # How well does the final summarization answer the users initial prompt?
 final_answer_relevance = (
@@ -56,18 +86,18 @@ sql_relevance = (
             .on(Select.RecordCalls.helper_function.rets['sql_gen'])
             .on(Select.RecordCalls.call_analyst_api.rets['message']['content'][1]['statement']))
 
-
+groundedness_configs = core_feedback.GroundednessConfigs(use_sent_tokenize=False, 
+                                                         filter_trivial_statements=False)
 # How well grounded in the sql results is the summarization
-summarization_groundedness = (Feedback(
-                partial(provider.groundedness_measure_with_cot_reasons, 
-                use_sent_tokenize=False), 
+summarization_groundedness = (Feedback(provider.groundedness_measure_with_cot_reasons, 
                 name="Summarization Groundedness", 
-                use_sent_tokenize=False)
+                use_sent_tokenize=True,
+                groundedness_configs = groundedness_configs)
                 .on(Select.RecordCalls.process_sql.rets)
                 .on_output())
 
 
-feedback_list = [interpretation_accuracy, sql_relevance, summarization_groundedness, final_answer_relevance]
+feedback_list = [interpretation_accuracy, sql_relevance, final_answer_relevance, summarization_groundedness]
 
 
 class CortexAnalyst():
@@ -170,8 +200,8 @@ class CortexAnalyst():
     @instrument
     def summarize_sql_results(self, prompt: str) -> str:
         sql_result = self.process_api_response(prompt)
-        st.write("Summarizing result...")
-        summarized_result = complete("claude-3-5-sonnet", 
+        st.write(f"Summarizing result using {SUMMARIZATION_LLM}...")
+        summarized_result = complete(SUMMARIZATION_LLM, 
                                      f'''Summarize the following input prompt and corresponding SQL result 
                                      from markdown into a succint human readable summary. 
                                      Original prompt - {prompt}
