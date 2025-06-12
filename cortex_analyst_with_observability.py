@@ -56,7 +56,7 @@ SUMMARIZATION_LLM = st.sidebar.selectbox('Select your Summarization LLM:',(
                 "llama3.1-405b",
                 "llama3.2-1b",
                 "llama3.2-3b",
-                "snowflake-llama3.3-70b",
+                "snowflake-llama3.3-70b", 
                 "mistral-large",
                 "mistral-large2",
                 "mistral-7b",
@@ -66,7 +66,7 @@ SUMMARIZATION_LLM = st.sidebar.selectbox('Select your Summarization LLM:',(
                 "snowflake-arctic",
                 "snowflake-llama-3.1-405b"), key="model_name")
 
-# Final Answer Relevance - How well does the final summarization answer the users initial prompt?
+# Final Answer RelevanceHow well does the final summarization answer the users initial prompt?
 final_answer_relevance = (
             Feedback(provider.relevance_with_cot_reasons, name = "Final Answer Relevance")
             .on_input()
@@ -100,11 +100,13 @@ sql_relevance = (
 #Summarization Groundedness -  How well grounded in the sql results is the summarization
 groundedness_configs = core_feedback.GroundednessConfigs(use_sent_tokenize=False, 
                                                          filter_trivial_statements=False)
-# How well does the final summarization answer the users initial prompt?
-final_answer_relevance = (
-            Feedback(provider.relevance_with_cot_reasons, name = "Final Answer relevance")
-            .on_input()
-            .on_output())
+summarization_groundedness = (Feedback(provider.groundedness_measure_with_cot_reasons, 
+                name="Summarization Groundedness", 
+                use_sent_tokenize=True,
+                groundedness_configs = groundedness_configs)
+                .on(Select.RecordCalls.process_sql.rets)
+                .on_output())
+
 
 feedback_list = [interpretation_accuracy, sql_relevance, final_answer_relevance, summarization_groundedness]
 
