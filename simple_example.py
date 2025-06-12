@@ -32,14 +32,14 @@ except:
         conn = SnowflakeConnector(snowpark_session=snowpark_session)
         tru_session = TruSession(connector=conn)
         #Define llm for eval
-        provider = Cortex(snowpark_session, "openai-gpt-4.1")
+        provider = Cortex(snowpark_session, "mistral-large2")
         return  tru_session, provider
     tru_session, provider = create_tru_session()
 
 
 SUMMARIZATION_LLM = st.sidebar.selectbox('Select your Summarization LLM:',(
-                "openai-gpt-4.1",
                 "mistral-large2",
+                "openai-gpt-4.1",
                 "llama3.3-70b",
                 "llama3.1-70b",
                 "llama4-maverick",
