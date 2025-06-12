@@ -38,8 +38,8 @@ except:
 
 
 SUMMARIZATION_LLM = st.sidebar.selectbox('Select your Summarization LLM:',(
-                "openai-gpt-4.1",
                 "mistral-large2",
+                "openai-gpt-4.1",
                 "llama3.3-70b",
                 "llama3.1-70b",
                 "llama4-maverick",
@@ -66,36 +66,45 @@ SUMMARIZATION_LLM = st.sidebar.selectbox('Select your Summarization LLM:',(
                 "snowflake-arctic",
                 "snowflake-llama-3.1-405b"), key="model_name")
 
+# Final Answer Relevance - How well does the final summarization answer the users initial prompt?
+final_answer_relevance = (
+            Feedback(provider.relevance_with_cot_reasons, name = "Final Answer Relevance")
+            .on_input()
+            .on_output())
+
+# Interpretation Accuracy - How accurately is cortex analyst inpreting the users prompt?
+interpretation_criteria = """Provided is a user query as input 1 and an LLM generated interpretation 
+                            of the users query as input 2. Grade how strong the interpretation was and explain
+                            any discrepencies in the interpretation."""
+
+interpretation_accuracy = (
+                Feedback(provider.relevance_with_cot_reasons,
+                name="Interpretation Accuracy",
+                criteria = interpretation_criteria)
+                .on_input()
+                .on(Select.RecordCalls.call_analyst_api.rets['message']['content'][0]['text']))
+
+# SQL Relevance - How relevant is the generated SQL to the users prompt?
+sql_gen_criteria = """Provided is an interpretation of a user's query as input 1 and an LLM generated SQL query 
+                    designed to answer the users query as input 2. Grade how relevant the SQL code 
+                    appears to be to the user's question."""
+
+sql_relevance = (
+            Feedback(provider.relevance_with_cot_reasons, 
+            name = "SQL relevance",
+            criteria = sql_gen_criteria)
+            .on(Select.RecordCalls.call_analyst_api.rets['message']['content'][0]['text'])
+            .on(Select.RecordCalls.call_analyst_api.rets['message']['content'][1]['statement']))
+
+
+#Summarization Groundedness -  How well grounded in the sql results is the summarization
+groundedness_configs = core_feedback.GroundednessConfigs(use_sent_tokenize=False, 
+                                                         filter_trivial_statements=False)
 # How well does the final summarization answer the users initial prompt?
 final_answer_relevance = (
             Feedback(provider.relevance_with_cot_reasons, name = "Final Answer relevance")
             .on_input()
             .on_output())
-    
-# How accurately is cortex analyst inpreting the users prompt?
-interpretation_accuracy = (
-                Feedback(provider.relevance_with_cot_reasons,
-                name="Interpretation Accuracy")
-                .on(Select.RecordCalls.helper_function.rets['interpretation'])
-                .on(Select.RecordCalls.call_analyst_api.rets['message']['content'][0]['text']))
-
-# How relevant is the generated SQL to the users prompt?
-sql_relevance = (
-            Feedback(provider.relevance_with_cot_reasons, 
-            name = "SQL relevance")
-            .on(Select.RecordCalls.helper_function.rets['sql_gen'])
-            .on(Select.RecordCalls.call_analyst_api.rets['message']['content'][1]['statement']))
-
-groundedness_configs = core_feedback.GroundednessConfigs(use_sent_tokenize=False, 
-                                                         filter_trivial_statements=False)
-# How well grounded in the sql results is the summarization
-summarization_groundedness = (Feedback(provider.groundedness_measure_with_cot_reasons, 
-                name="Summarization Groundedness", 
-                use_sent_tokenize=True,
-                groundedness_configs = groundedness_configs)
-                .on(Select.RecordCalls.process_sql.rets)
-                .on_output())
-
 
 feedback_list = [interpretation_accuracy, sql_relevance, final_answer_relevance, summarization_groundedness]
 
@@ -207,6 +216,90 @@ class CortexAnalyst():
                                      Original prompt - {prompt}
                                      Sql result markdown - {sql_result}''')
         st.write(f"**{summarized_result}**")
+        # helper = self.helper_function(prompt)
+        return summarized_result
+
+    @instrument
+    def process_api_response(self, prompt: str) -> str:
+        """Processes a message and adds the response to the chat."""
+        st.session_state.messages.append(
+            {"role": "user", "content": [{"type": "text", "text": prompt}]}
+        )
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        with st.chat_message("assistant"):
+            with st.spinner("Generating response..."):
+                # response = "who had the most rec yards week 10"
+                response = self.call_analyst_api(prompt=prompt)
+                request_id = response["request_id"]
+                content = response["message"]["content"]
+                st.session_state.messages.append(
+                    {**response['message'], "request_id": request_id}
+                )
+                final_return = self.process_sql(content=content, request_id=request_id)  # type: ignore[arg-type]
+                
+        return final_return
+        
+    @instrument
+    def process_sql(self,
+        content: List[Dict[str, str]],
+        request_id: Optional[str] = None,
+        message_index: Optional[int] = None,
+    ) -> str:
+        """Displays a content item for a message."""
+        message_index = message_index or len(st.session_state.messages)
+        sql_markdown = 'No SQL returned!'
+        if request_id:
+            with st.expander("Request ID", expanded=False):
+                st.markdown(request_id)
+        for item in content:
+            if item["type"] == "text":
+                st.markdown(item["text"])
+            elif item["type"] == "suggestions":
+                with st.expander("Suggestions", expanded=True):
+                    for suggestion_index, suggestion in enumerate(item["suggestions"]):
+                        if st.button(suggestion, key=f"{message_index}_{suggestion_index}"):
+                            st.session_state.active_suggestion = suggestion
+            elif item["type"] == "sql":
+                sql_markdown = self.execute_sql(sql = item["statement"])
+
+        return sql_markdown
+
+    # @st.cache_data
+    @instrument
+    def execute_sql(self, sql: str) -> None:
+        with st.expander("SQL Query", expanded=False):
+            st.code(sql, language="sql")
+        with st.expander("Results", expanded=True):
+            with st.spinner("Running SQL..."):
+                session = get_active_session()
+                df = session.sql(sql).to_pandas()
+                if len(df.index) > 1:
+                    data_tab, line_tab, bar_tab = st.tabs(
+                        ["Data", "Line Chart", "Bar Chart"]
+                    )
+                    data_tab.dataframe(df)
+                    if len(df.columns) > 1:
+                        df = df.set_index(df.columns[0])
+                    with line_tab:
+                        st.line_chart(df)
+                    with bar_tab:
+                        st.bar_chart(df)
+                else:
+                    st.dataframe(df)
+
+        return df.to_markdown(index=True)
+
+    @instrument
+    def summarize_sql_results(self, prompt: str) -> str:
+        sql_result = self.process_api_response(prompt)
+        st.write(f"Summarizing result using {SUMMARIZATION_LLM}...")
+        summarized_result = complete(SUMMARIZATION_LLM, 
+                                     f'''Summarize the following input prompt and corresponding SQL result 
+                                     from markdown into a succint human readable summary. 
+                                     Original prompt - {prompt}
+                                     Sql result markdown - {sql_result}''')
+        st.write(f"**{summarized_result}**")
         helper = self.helper_function(prompt)
         return summarized_result
 
@@ -218,12 +311,11 @@ class CortexAnalyst():
         return helper_dict
 
 
-
 #instantiate class
 CA = CortexAnalyst()
 
-TRULENS_APP_NAME = "CORTEX_ANALYST_WITH_AI_OBSERVABILITY"
-TRULENS_APP_VERSION = "V0"
+TRULENS_APP_NAME = "CORTEX_ANALYST_APP"
+TRULENS_APP_VERSION = SUMMARIZATION_LLM
 
 # CREATE TRULENS APP WITH CA instance
 tru_app = TruCustomApp(
@@ -255,7 +347,7 @@ def reset() -> None:
 
 
 
-st.title(f":brain: Text to SQL Assistant with Snowflake Cortex :brain:")
+st.title(f":snowflake: Text to SQL Assistant with Snowflake Cortex :snowflake:")
 
 st.markdown(f"Semantic Model: `{FILE}`")
 
