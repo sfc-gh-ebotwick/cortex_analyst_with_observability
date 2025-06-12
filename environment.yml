@@ -7,7 +7,7 @@ dependencies:
   - snowflake-snowpark-python=
   - streamlit=
   - tabulate=0.9.0
-  - trulens-connectors-snowflake=1.2.4
-  - trulens-core=1.2.4
-  - trulens-feedback=1.2.11
-  - trulens-providers-cortex=1.2.4
+  - trulens-connectors-snowflake=1.4.9
+  - trulens-core=1.4.9
+  - trulens-feedback=1.4.9
+  - trulens-providers-cortex=1.4.9
