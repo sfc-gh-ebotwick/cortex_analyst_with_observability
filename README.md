@@ -16,5 +16,5 @@ Demo showing AI observability integration with Cortex Analyst in Snowflake
    * #### Summarization Groundedness - How well grounded in the sql results is the summarization?
    * #### Final Answer Relevance - How well does the final summarization answer the users initial prompt?
 
-### Demo recording - [link](https://drive.google.com/file/d/10QSzw6a7Zru0LcppJDmmcA7l8ju7ymO6/view?usp=sharing)
+### Demo recording - [link](https://drive.google.com/file/d/1e3iJYSEZt55khj7raySBYIlaJDL1_4pz/view?usp=drive_link)
 ##### This demo is meant to serve as an illustrative example of how observability could be run on top of an agentic sql generation application
