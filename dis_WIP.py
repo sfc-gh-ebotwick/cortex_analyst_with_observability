@@ -1,3 +1,5 @@
+#What was the revenue for electronics products?
+
 import json
 import time
 from datetime import datetime
@@ -7,14 +9,15 @@ import pandas as pd
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark.exceptions import SnowparkSQLException
-from snowflake.cortex import complete
 # Trulens imports for evaluation and feedback
 from trulens.core import TruSession, Feedback, Select
 from trulens.connectors.snowflake import SnowflakeConnector
 from trulens.providers.cortex import Cortex
 from trulens.apps.custom import instrument, TruCustomApp
-# from trulens.apps.app import TruApp
+from trulens.apps.app import TruApp
 import os
+from trulens.core.feedback import feedback as core_feedback
+
 
 # Log Trulens version for debugging
 # try:
@@ -44,16 +47,16 @@ snowpark_session = get_active_session()
 
 # --- Trulens Setup ---
 # Custom connector to bypass database access issues in UDF
-# class CustomSnowflakeConnector:
-#     def __init__(self, snowpark_session, database, schema):
-#         self.snowpark_session = snowpark_session
-#         self.database = database
-#         self.schema = schema
-#     def get_app(self, app_id):
-#         return None  # Minimal implementation
-#     def __getattr__(self, name):
-#         # Fallback to avoid attribute errors
-#         return lambda *args, **kwargs: None
+class CustomSnowflakeConnector:
+ def __init__(self, snowpark_session, database, schema):
+     self.snowpark_session = snowpark_session
+     self.database = database
+     self.schema = schema
+ def get_app(self, app_id):
+     return None  # Minimal implementation
+ def __getattr__(self, name):
+     # Fallback to avoid attribute errors
+     return lambda *args, **kwargs: None
 
 # Initialize SnowflakeConnector
 try:
@@ -65,8 +68,8 @@ try:
     st.write(f"Connector type: {type(conn).__name__}")
 except Exception as e:
     st.warning(f"SnowflakeConnector initialization failed: {str(e)}. Using custom connector.")
-    # conn = CustomSnowflakeConnector(snowpark_session, DATABASE, SCHEMA)
-    # st.write(f"Connector type: {type(conn).__name__}")
+    conn = CustomSnowflakeConnector(snowpark_session, DATABASE, SCHEMA)
+    st.write(f"Connector type: {type(conn).__name__}")
 
 # Initialize TruSession
 tru_session = TruSession()
@@ -75,38 +78,53 @@ if tru_session.connector is None:
     st.error("Failed to set TruSession connector.")
 else:
     st.write("TruSession connector initialized successfully.")
-    st.write(snowpark_session)
 
 # Initialize Cortex provider
-provider = Cortex(snowpark_session, "llama3.1-70b")
+provider = Cortex(snowpark_session, "mistral-large2")
+#openai gpt-41 works well
 
-# --- Trulens Feedback Definitions ---
+# Final Answer RelevanceHow well does the final summarization answer the users initial prompt?
 final_answer_relevance = (
-    Feedback(provider.relevance_with_cot_reasons, name="Final Answer Relevance")
-    .on_input()
-    .on_output()
-)
-# interpretation_accuracy = (
-#     Feedback(provider.relevance_with_cot_reasons, name="Interpretation Accuracy")
-#     .on(Select.RecordCalls.helper_function.rets['interpretation'])
-#     .on(Select.RecordCalls.get_analyst_response.rets['message']['content'][0]['text'])
-# )
-# sql_relevance = (
-#     Feedback(provider.relevance_with_cot_reasons, name="SQL Relevance")
-#     .on(Select.RecordCalls.helper_function.rets['sql_gen'])
-#     .on(Select.RecordCalls.get_analyst_response.rets['message']['content'][1]['statement'])
-# )
-# summarization_groundedness = (
-#     Feedback(
-#         provider.groundedness_measure_with_cot_reasons,
-#         name="Summarization Groundedness"
-#     )
-#     .on(Select.RecordCalls.execute_query.rets)
-#     .on_output()
-# )
-feedback_list = [final_answer_relevance]
-#interpretation_accuracy, sql_relevance, summarization_groundedness
+            Feedback(provider.relevance_with_cot_reasons, name = "Final Answer Relevance")
+            .on_input()
+            .on_output())
 
+# Interpretation Accuracy - How accurately is cortex analyst inpreting the users prompt?
+interpretation_criteria = """Provided is a user query as input 1 and an LLM generated interpretation 
+                            of the users query as input 2. Grade how strong the interpretation was and explain
+                            any discrepencies in the interpretation."""
+
+interpretation_accuracy = (
+                Feedback(provider.relevance_with_cot_reasons,
+                name="Interpretation Accuracy",
+                criteria = interpretation_criteria)
+                .on_input()
+                .on(Select.RecordCalls.get_analyst_response.rets[0]['message']['content'][0]['text']))
+
+# SQL Relevance - How relevant is the generated SQL to the users prompt?
+sql_gen_criteria = """Provided is an interpretation of a user's query as input 1 and an LLM generated SQL query 
+                    designed to answer the users query as input 2. Grade how relevant the SQL code 
+                    appears to be to the user's question."""
+
+sql_relevance = (
+            Feedback(provider.relevance_with_cot_reasons, 
+            name = "SQL relevance",
+            criteria = sql_gen_criteria)
+            .on(Select.RecordCalls.get_analyst_response.rets[0]['message']['content'][0]['text'])
+            .on(Select.RecordCalls.get_analyst_response.rets[0]['message']['content'][1]['statement']))
+
+#Summarization Groundedness -  How well grounded in the sql results is the summarization
+groundedness_configs = core_feedback.GroundednessConfigs(use_sent_tokenize=False, 
+                                                         filter_trivial_statements=False)
+summarization_groundedness = (Feedback(provider.groundedness_measure_with_cot_reasons, 
+                name="Summarization Groundedness", 
+                use_sent_tokenize=True,
+                groundedness_configs = groundedness_configs)
+                .on(Select.RecordCalls.summarize_results.rets)
+                .on_output())
+
+
+feedback_list = [interpretation_accuracy, sql_relevance, final_answer_relevance, summarization_groundedness]
 
 # --- CortexAnalyst Class for Instrumented Functions ---
 class CortexAnalyst:
@@ -130,8 +148,6 @@ class CortexAnalyst:
             f"* error code: `{parsed_content['error_code']}`\n\n"
             f"Message:\n```\n{parsed_content['message']}\n```"
         )
-
-        st.write(error_msg)
         return parsed_content, error_msg
 
     @instrument
@@ -159,35 +175,23 @@ class CortexAnalyst:
         prompt = (
             "Based on the user's question: '{}', "
             "here is a sample of the query results in CSV format:\n{}"
-            "\nProvide a concise natural language summary of the data in context of the question. Format results neatly with markdown"
+            "\nProvide a concise natural language summary of the data in context of the question."
         ).format(sanitized_prompt, data_str)
-        
-        summary = complete('claude-3-5-sonnet', prompt)
-        
-        
-        # snowpark_session.sql(
-        #     "SELECT SNOWFLAKE.CORTEX.COMPLETE(?, ?) AS summary",
-        #     params=["claude-3-5-sonnet", prompt]
-        # ).to_pandas()
-        
-        return summary
-
+        summary_df = snowpark_session.sql(
+            "SELECT SNOWFLAKE.CORTEX.COMPLETE(?, ?) AS summary",
+            params=["claude-3-5-sonnet", prompt]
+        ).to_pandas()
+        return summary_df["SUMMARY"][0]
+    
     @instrument
-    def helper_function(self, prompt: str) -> dict:
-        """Generates inputs for Trulens feedback evaluation."""
-        return {
-            'interpretation': f"Interpret or clarify the following prompt: {prompt}",
-            'sql_gen': f"Create sql that would be appropriate to answer the input prompt - {prompt}"
-        }
-    @instrument
-    def process_user_input(self, prompt: str):
+    def process_user_input_2(self, prompt: str) -> None :
         """Processes user input, generates response, and handles SQL execution and summarization."""
         st.session_state.warnings = []
         new_user_message = {"role": "user", "content": [{"type": "text", "text": prompt}]}
         st.session_state.messages.append(new_user_message)
         with st.chat_message("user"):
             user_msg_index = len(st.session_state.messages) - 1
-            display_message(new_user_message["content"], user_msg_index)
+            self.display_message_2(new_user_message["content"], user_msg_index)
     
         with st.chat_message("analyst"):
             with st.spinner("Waiting for Infrastructure Analyst's response..."):
@@ -202,10 +206,10 @@ class CortexAnalyst:
                     st.session_state.warnings = response["warnings"]
                 if error_msg:
                     st.session_state["fire_API_error_notify"] = True
-                # if analyst_message["content"][1]["type"] != "sql":
-                #     st.session_state.messages.append(analyst_message)
-                #     st.write(analyst_message["content"][0]["text"])
-                #     st.rerun()
+                if analyst_message["content"][1]["type"] != "sql":
+                    st.session_state.messages.append(analyst_message)
+                    st.write(analyst_message["content"][0]["text"])
+                    st.rerun()
                 else:
                     with st.spinner("Running query and summarizing results..."):
                         time.sleep(1)
@@ -219,7 +223,6 @@ class CortexAnalyst:
                             analyst_message["content"].append({"type": "text", "text": summary})
                             st.session_state.messages.append(analyst_message)
                             if feedback_enabled:
-                                st.write("FEEDBACK IS ENABLED")
                                 try:
                                     with st.sidebar.expander("Trulens Feedback", expanded=True):
                                         records = tru_session.get_records_and_feedback(app_ids=["CORTEX_ANALYST"])[0]
@@ -230,23 +233,57 @@ class CortexAnalyst:
                                 except Exception as e:
                                     st.sidebar.warning(f"Failed to display feedback: {str(e)}")
                             st.rerun()
-        return summary
 
+    @instrument
+    def display_message_2(self, content: List[Dict], message_index: int, request_id: Optional[str] = None):
+        """Displays a single message's content (text, suggestions, or SQL)."""
+        for item in content:
+            if item["type"] == "text":
+                st.markdown(item["text"])
+            elif item["type"] == "suggestions":
+                for suggestion_index, suggestion in enumerate(item["suggestions"]):
+                    if st.button(suggestion, key=f"suggestion_{message_index}_{suggestion_index}"):
+                        st.session_state.active_suggestion = suggestion
+            elif item["type"] == "sql":
+                self.display_sql_query_2(item["statement"], message_index, item["confidence"], request_id)
+
+    @instrument
+    def display_sql_query_2(self, sql: str, message_index: int, confidence: dict, request_id: Optional[str]):
+        """Displays SQL query, results, and charts."""
+        with st.expander("SQL Query", expanded=False):
+            st.code(sql, language="sql")
+            #display_sql_confidence(confidence)
+        with st.expander("Results", expanded=True):
+            with st.spinner("Running SQL..."):
+                df, error = self.execute_query(sql)
+                if df is None:
+                    st.error(f"Could not execute SQL query. Error: {str(error)}")
+                elif df.empty:
+                    st.write("Query returned no data")
+                else:
+                    data_tab, chart_tab = st.tabs(["Data 📄", "Chart 📉"])
+                    with data_tab:
+                        st.dataframe(df, use_container_width=True)
+                    #with chart_tab:
+                        #display_charts_tab(df, message_index)
+        #if request_id:
+            #display_feedback_section(request_id)
+        
 
 # Instantiate CortexAnalyst and TruCustomApp
 CA = CortexAnalyst()
-feedback_enabled = True
+feedback_enabled = False
 try:
     # Attempt with feedback logging
-    tru_app = TruCustomApp(
+    tru_app = TruApp(
         app = CA,
         app_id="CORTEX_ANALYST",
         app_name = "Storage-Analyst_with_Trulens",
-        app_version= 'v3',
+        app_version= 'v1',
         feedbacks=feedback_list,
+        main_method=CA.get_analyst_response,
         session=tru_session
     )
-    
     feedback_enabled = True
     st.write("TruCustomApp initialized with feedback logging.")
     st.write(f"TruCustomApp connector set: {tru_app.connector is not None}")
@@ -273,17 +310,7 @@ def main():
         reset_session_state()
     show_header_and_sidebar()
     display_conversation()
-    # handle_user_inputs()
-    
-    user_input = st.chat_input("What is your question?")
-    st.write(f"User Input: {user_input}")
-    if user_input:
-        st.write("FOUND USER INPUT!")
-
-        with tru_app as recording:
-            CA.process_user_input(user_input)
-        st.write("RECORDED_APP_CALL!")
-        
+    handle_user_inputs()
     handle_error_notifications()
 
 def reset_session_state():
@@ -329,14 +356,19 @@ def handle_user_inputs():
     user_input = st.chat_input("What is your question?")
     if user_input:
         with tru_app as recording:
-            CA.process_user_input(user_input)
-        st.write("TRULENS_FINISHED_RECORDING")
+            st.write(recording)
+            st.write("****************NOW TRU_APP****************")
+            st.write(tru_app)
+            time.sleep(15)
+            #CA.process_user_input_2(user_input)
+            process_user_input(user_input)
         st.session_state.active_suggestion = None
     elif st.session_state.active_suggestion:
         suggestion = st.session_state.active_suggestion
         st.session_state.active_suggestion = None
         with tru_app as recording:
-            CA.process_user_input(suggestion)
+            #CA.process_user_input_2(suggestion)
+            process_user_input(suggestion)
 
 def handle_error_notifications():
     """Displays error notifications for API failures."""
@@ -344,6 +376,55 @@ def handle_error_notifications():
         st.toast("An API error has occurred!", icon="🚨")
         st.session_state["fire_API_error_notify"] = False
 
+def process_user_input(prompt: str):
+    """Processes user input, generates response, and handles SQL execution and summarization."""
+    st.session_state.warnings = []
+    new_user_message = {"role": "user", "content": [{"type": "text", "text": prompt}]}
+    st.session_state.messages.append(new_user_message)
+    with st.chat_message("user"):
+        user_msg_index = len(st.session_state.messages) - 1
+        display_message(new_user_message["content"], user_msg_index)
+
+    with st.chat_message("analyst"):
+        with st.spinner("Waiting for Infrastructure Analyst's response..."):
+            time.sleep(1)
+            response, error_msg = CA.get_analyst_response(st.session_state.messages)
+            analyst_message = {
+                "role": "analyst",
+                "content": response["message"]["content"] if error_msg is None else [{"type": "text", "text": error_msg}],
+                "request_id": response["request_id"],
+            }
+            if "warnings" in response:
+                st.session_state.warnings = response["warnings"]
+            if error_msg:
+                st.session_state["fire_API_error_notify"] = True
+            if analyst_message["content"][1]["type"] != "sql":
+                st.session_state.messages.append(analyst_message)
+                st.write(analyst_message["content"][0]["text"])
+                st.rerun()
+            else:
+                with st.spinner("Running query and summarizing results..."):
+                    time.sleep(1)
+                    sql = analyst_message["content"][1]["statement"]
+                    df, error = CA.execute_query(sql)
+                    if error:
+                        st.error(f"Query failed: {str(error)}")
+                    else:
+                        user_prompt = next((msg["content"][0]["text"] for msg in reversed(st.session_state.messages) if msg["role"] == "user"), "Unknown query")
+                        summary = CA.summarize_results(df, user_prompt)
+                        analyst_message["content"].append({"type": "text", "text": summary})
+                        st.session_state.messages.append(analyst_message)
+                        if feedback_enabled:
+                            try:
+                                with st.sidebar.expander("Trulens Feedback", expanded=True):
+                                    records = tru_session.get_records_and_feedback(app_ids=["CORTEX_ANALYST"])[0]
+                                    if not records.empty:
+                                        for feedback_name in [f.name for f in feedback_list]:
+                                            score = records[records["feedback_name"] == feedback_name]["score"].iloc[-1] if feedback_name in records["feedback_name"].values else "N/A"
+                                            st.write(f"{feedback_name}: {score}")
+                            except Exception as e:
+                                st.sidebar.warning(f"Failed to display feedback: {str(e)}")
+                        st.rerun()
 
 def display_conversation():
     """Displays the chat conversation history."""
