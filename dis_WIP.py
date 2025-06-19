@@ -1,4 +1,6 @@
 #What was the revenue for electronics products?
+#How was forecasted revenue in 2023?
+# how do product lines compare in terms of revenue?
 
 import json
 import time
@@ -31,16 +33,16 @@ from trulens.core.feedback import feedback as core_feedback
 
 # Configuration constants
 AVAILABLE_SEMANTIC_MODELS_PATHS = [
-    "CORTEX_ANALYST_DEMO.REVENUE_TIMESERIES.RAW_DATA/revenue_timeseries.yaml"
+    "CORTEX_ANALYST_DEMO.REVENUE_TIMESERIES.RAW_DATA/revenue_timeseries_semantic.yaml"
 ]
 API_ENDPOINT = "/api/v2/cortex/analyst/message"
 API_TIMEOUT = 50000  # in milliseconds
 FEEDBACK_API_ENDPOINT = "/api/v2/cortex/analyst/feedback"
-SUMMARY_MODELS = ["claude-3-5-sonnet"]
+SUMMARY_MODELS = ["llama3.1-70b"]
 DATABASE = "CORTEX_ANALYST_DEMO"
 SCHEMA = "REVENUE_TIMESERIES"
 STAGE = "RAW_DATA"
-FILE = "revenue_timeseries.yaml"
+FILE = "revenue_timeseries_semantic.yaml"
 
 # Initialize Snowpark session for Snowflake queries
 snowpark_session = get_active_session()
@@ -184,14 +186,15 @@ class CortexAnalyst:
         return summary_df["SUMMARY"][0]
     
     @instrument
-    def process_user_input_2(self, prompt: str) -> None :
+    def process_user_input_2(self, prompt: str):
         """Processes user input, generates response, and handles SQL execution and summarization."""
         st.session_state.warnings = []
         new_user_message = {"role": "user", "content": [{"type": "text", "text": prompt}]}
         st.session_state.messages.append(new_user_message)
         with st.chat_message("user"):
             user_msg_index = len(st.session_state.messages) - 1
-            self.display_message_2(new_user_message["content"], user_msg_index)
+            #self.display_message_2(new_user_message["content"], user_msg_index)
+            display_message(new_user_message["content"], user_msg_index)
     
         with st.chat_message("analyst"):
             with st.spinner("Waiting for Infrastructure Analyst's response..."):
@@ -214,25 +217,44 @@ class CortexAnalyst:
                     with st.spinner("Running query and summarizing results..."):
                         time.sleep(1)
                         sql = analyst_message["content"][1]["statement"]
-                        df, error = self.execute_query(sql)
+                        if 1 == 2:
+                            return "HI 8"
+                        try:
+                            df, error = self.execute_query(sql)
+                        except Exception as e:
+                            return "HI 9"
+                        if 1 == 2:
+                            return "HI 10"
                         if error:
+                            if 1 == 1:
+                                return "HI 11"
                             st.error(f"Query failed: {str(error)}")
                         else:
+                            if 1 == 2:
+                                return "HI 12"
                             user_prompt = next((msg["content"][0]["text"] for msg in reversed(st.session_state.messages) if msg["role"] == "user"), "Unknown query")
                             summary = self.summarize_results(df, user_prompt)
                             analyst_message["content"].append({"type": "text", "text": summary})
                             st.session_state.messages.append(analyst_message)
-                            if feedback_enabled:
-                                try:
-                                    with st.sidebar.expander("Trulens Feedback", expanded=True):
-                                        records = tru_session.get_records_and_feedback(app_ids=["CORTEX_ANALYST"])[0]
-                                        if not records.empty:
-                                            for feedback_name in [f.name for f in feedback_list]:
-                                                score = records[records["feedback_name"] == feedback_name]["score"].iloc[-1] if feedback_name in records["feedback_name"].values else "N/A"
-                                                st.write(f"{feedback_name}: {score}")
-                                except Exception as e:
-                                    st.sidebar.warning(f"Failed to display feedback: {str(e)}")
-                            st.rerun()
+
+                            return summary 
+                            # if 1 == 2:
+                            #     return "HI 13"
+                            # if feedback_enabled:
+                            #     if 1 == 2:
+                            #         return "HI 14"
+                            #     try:
+                            #         with st.sidebar.expander("Trulens Feedback", expanded=True):
+                            #             records = tru_session.get_records_and_feedback(app_ids=["CORTEX_ANALYST"])[0]
+                            #             if not records.empty:
+                            #                 for feedback_name in [f.name for f in feedback_list]:
+                            #                     score = records[records["feedback_name"] == feedback_name]["score"].iloc[-1] if feedback_name in records["feedback_name"].values else "N/A"
+                            #                     st.write(f"{feedback_name}: {score}")
+                            #     except Exception as e:
+                            #         st.sidebar.warning(f"Failed to display feedback: {str(e)}")
+                            # if 1 == 2:
+                            #     return "HI 15"
+                            # #st.rerun()
 
     @instrument
     def display_message_2(self, content: List[Dict], message_index: int, request_id: Optional[str] = None):
@@ -281,7 +303,7 @@ try:
         app_name = "Storage-Analyst_with_Trulens",
         app_version= 'v1',
         feedbacks=feedback_list,
-        main_method=CA.get_analyst_response,
+        #main_method=CA.get_analyst_response,
         session=tru_session
     )
     feedback_enabled = True
@@ -353,22 +375,28 @@ def show_header_and_sidebar():
 
 def handle_user_inputs():
     """Handles user input from the chat interface."""
-    user_input = st.chat_input("What is your question?")
+    user_input = st.chat_input("What is your question????")
     if user_input:
+        #st.write(recording)
+        #st.write("****************NOW TRU_APP****************")
+        #st.write(tru_app)
+        #time.sleep(15)
         with tru_app as recording:
-            st.write(recording)
-            st.write("****************NOW TRU_APP****************")
-            st.write(tru_app)
-            time.sleep(15)
-            #CA.process_user_input_2(user_input)
-            process_user_input(user_input)
+            st.write("KOJIKUN A1")
+            st.write(user_input)
+            st.write("KOJIKUN A2")
+            st.write(str(type(user_input)))
+            st.write("KOJIKUN A3")
+            CA.process_user_input_2(user_input)
+            st.rerun()
+            #process_user_input(user_input)
         st.session_state.active_suggestion = None
     elif st.session_state.active_suggestion:
         suggestion = st.session_state.active_suggestion
         st.session_state.active_suggestion = None
         with tru_app as recording:
-            #CA.process_user_input_2(suggestion)
-            process_user_input(suggestion)
+            CA.process_user_input_2(suggestion)
+            # process_user_input(suggestion)
 
 def handle_error_notifications():
     """Displays error notifications for API failures."""
