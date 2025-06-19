@@ -181,7 +181,7 @@ class CortexAnalyst:
         ).format(sanitized_prompt, data_str)
         summary_df = snowpark_session.sql(
             "SELECT SNOWFLAKE.CORTEX.COMPLETE(?, ?) AS summary",
-            params=["claude-3-5-sonnet", prompt]
+            params=["llama3.1-70b", prompt]
         ).to_pandas()
         return summary_df["SUMMARY"][0]
     
@@ -300,8 +300,8 @@ try:
     tru_app = TruApp(
         app = CA,
         app_id="CORTEX_ANALYST",
-        app_name = "Storage-Analyst_with_Trulens",
-        app_version= 'v1',
+        app_name = "Storage_Analyst_with_Trulens",
+        app_version= 'V1',
         feedbacks=feedback_list,
         #main_method=CA.get_analyst_response,
         session=tru_session
